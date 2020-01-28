@@ -2,11 +2,14 @@ from astropy.units.si import kg, W, m, Pa, K
 from astropy.units import dimensionless_unscaled
 from .composition import mean_molecular_weight
 from .physics import specific_heat_ratio, bound_free_absorption_coefficient, \
-    free_free_absorption_coefficient, pt_log_gradient
+    free_free_absorption_coefficient, pt_log_gradient, density, opacity, \
+    energy_generation_rate
 from astropy.constants import G, k_B, c
 from .constants import m_H, a
 from math import pi
-from .stellar_equations import radiation_criterion
+from .stellar_equations import radiation_criterion, mass_continuity, \
+    energy_generation
+
 
 def surface_zone_temperature_radiative(M_s: kg, R_s: m,
                                        mu: dimensionless_unscaled, r: m) -> K:
@@ -58,7 +61,7 @@ def surface_zone_conditions(M_s: kg, L_s: W, M_prev: kg, L_prev: W, r_prev: m,
                             P_prev: Pa, T_prev: K, X: dimensionless_unscaled,
                             Y: dimensionless_unscaled,
                             Z: dimensionless_unscaled, dr: m,
-                            rho: kg / m ** 3):
+                            rho: kg / m ** 3) -> dict:
     """
     Try to compute the physical quantities in the surface zone,
     assuming pressure, temperature and density at the surface are zero
@@ -67,6 +70,9 @@ def surface_zone_conditions(M_s: kg, L_s: W, M_prev: kg, L_prev: W, r_prev: m,
     within a certain acceptable range, or until a specific number of
     iterations have passed.
     """
+
+    # Assume everything will work out just fine
+    good_surface = True
 
     # maximum fraction change in M_r and L_r
     max_fraction_change: float = 1e-8
@@ -79,24 +85,78 @@ def surface_zone_conditions(M_s: kg, L_s: W, M_prev: kg, L_prev: W, r_prev: m,
     gamma = specific_heat_ratio()
     gamma_ratio = gamma / (gamma - 1)
 
-    # To begin with, assume the surface is radiative
-    radiative = True
+    done = False
+    j = 0
 
-    T = surface_zone_temperature_radiative(M_s, r_prev, mu, r)
-    A = bound_free_absorption_coefficient(rho, X, Z, surface=True) + \
-        free_free_absorption_coefficient(X, Z)
-    P = surface_zone_pressure_radiative(M_s, L_s, mu, A, T)
+    result = {}
 
-    # TODO try TF auto-diff
-    dlnPdlnT = pt_log_gradient(P, T, P_prev, T_prev)
+    while not done:
+        # Assume the surface is radiative
+        T = surface_zone_temperature_radiative(M_s, r_prev, mu, r)
+        A = bound_free_absorption_coefficient(rho, X, Z, surface=True) + \
+            free_free_absorption_coefficient(X, Z)
+        P = surface_zone_pressure_radiative(M_s, L_s, mu, A, T)
+        # TODO try TF auto-diff
+        dlnPdlnT = pt_log_gradient(P, T, P_prev, T_prev)
 
-    # If Radiation Criterion not satisfied, then
-    # recompute P and T based on Convection Eqns
-    if not radiation_criterion(dlnPdlnT, gamma):
-        radiative = False
-        T = surface_zone_temperature_convective(M_s, r_prev, mu, r, gamma)
-        P = surface_zone_pressure_convective(T, T_prev, P_prev, gamma)
+        result["Pressure"] = P
+        result["Temperature"] = T
+        result["dlnPdlnT"] = dlnPdlnT
+        result["r"] = r
+        result["dr"] = dr
 
-    rho =
+        rho = density(T, P, mu)
+        # Negative rho means something went wrong
+        if rho < 0:
+            good_surface = False
+            done = True
+            result["done"] = done
+            result["good_surface"] = good_surface
+            break
+
+        kappa = opacity(T, rho, X, Z, surface=False)
+        epsilon = energy_generation_rate(T, rho, X, Y, Z)
+
+        # Check the variations in M and L are not too large
+        dMdr = mass_continuity(r, rho)
+        dM = dMdr*dr
+        M_r = M_prev + dM
+
+        dLdr = energy_generation(r, rho, epsilon)
+        dL = dLdr*dr
+        L_r = L_prev + dL
+
+        result["density"] = rho
+        result["opacity"] = kappa
+        result["energy_gen_rate"] = epsilon
+        result["dMdr"] = dMdr
+        result["M_r"] = M_r
+        result["dLdr"] = dLdr
+        result["L_r"] = L_r
+
+        if abs((M_s - M_r)/M_s) < max_fraction_change and abs((L_s - L_r)/L_s) < max_fraction_change:
+            good_surface = True
+            done = True
+            result["done"] = done
+            result["good_surface"] = good_surface
+            break
+
+        j += 1
+        if j > max_iterations:
+            good_surface = False
+            done = True
+            result["done"] = done
+            result["good_surface"] = good_surface
+            break
+
+        dr /= 2
+        r = r_prev + dr
+
+    return result
+
+
+
+
+
 
 
