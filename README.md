@@ -1,5 +1,5 @@
 # pystar
-Model of a simple Zero-Age Main Sequence (ZAMS) Homogenous star, based on `StatStar` as provided in Appendix L of Carroll and Ostlie 2nd. Ed.
+Model simulating a simple Zero-Age Main Sequence (ZAMS) Homogenous star, based on `StatStar` as provided in Appendix L of Carroll and Ostlie 2nd. Ed.
 
 See 
 - `stellar_equations.py` for implementation of eqns of stellar structure and evolution, such as Hydrostatic Equilibrium, Mass Continuity, Energy generation and transport.
